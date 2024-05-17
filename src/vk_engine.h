@@ -5,6 +5,25 @@
 
 #include <vk_types.h>
 
+struct DeletionQueue
+{
+	std::deque<std::function<void()>> deletors;
+	void push_function(std::function<void()>&& func)
+	{
+		deletors.push_back(func);
+	}
+
+	void flush()
+	{
+		//reverse-iterate the deletion queue to execute all the functions in reverse order
+		for(auto it = deletors.rbegin(); it != deletors.rend(); it++)
+		{
+			(*it)();//call functors
+		}
+		deletors.clear();
+	}
+};
+
 struct FrameData
 {
 	VkCommandPool _commandPool;
@@ -12,6 +31,7 @@ struct FrameData
 	VkSemaphore _swapchainSemaphore;
 	VkSemaphore _renderSemaphore;
 	VkFence _renderFence;
+	DeletionQueue _deletionQueue;
 };
 
 constexpr unsigned int FRAME_OVERLAP = 2;
@@ -41,6 +61,10 @@ public:
 	VkQueue _graphicsQueue;
 	uint32_t _graphicsQueueFamily;
 
+	//draw resources
+	AllocatedImage _drawImage;
+	VkExtent2D _drawExtent;
+
 	FrameData& get_current_frame() { return _frames[_frameNumber % FRAME_OVERLAP]; };
 
 	struct SDL_Window* _window{ nullptr };
@@ -60,10 +84,13 @@ public:
 	void run();
 
 private:
+	DeletionQueue _mainDeletionQueue;
+	VmaAllocator _allocator;
 	void init_vulkan();
 	void init_swapchain();
 	void init_commands();
 	void init_sync_structures();
+	void draw_background(VkCommandBuffer cmd);
 
 	void create_swapchain(uint32_t width, uint32_t height);
 	void destroy_swapchain();
