@@ -4,6 +4,7 @@
 #pragma once
 
 #include <vk_types.h>
+#include "vk_descriptors.h"
 
 struct DeletionQueue
 {
@@ -50,6 +51,12 @@ public:
 	VkSurfaceKHR _surface;
 	VkSwapchainKHR _swapchain;
 	VkFormat _swapchainImageFormat;
+	DescriptorAllocator _globalDesriptorAllocator;
+	VkPipeline _gradientPipeline;
+	VkPipelineLayout _gradientPipelineLayout;
+
+	VkDescriptorSet _drawImageDescriptors;
+	VkDescriptorSetLayout _drawImageDescriptorLayout;
 
 	//handles to the actual images
 	std::vector<VkImage> _swapchainImages;
@@ -90,6 +97,9 @@ private:
 	void init_swapchain();
 	void init_commands();
 	void init_sync_structures();
+	void init_descriptors();
+	void init_pipelines();
+	void init_background_pipelines();
 	void draw_background(VkCommandBuffer cmd);
 
 	void create_swapchain(uint32_t width, uint32_t height);

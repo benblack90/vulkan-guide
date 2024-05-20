@@ -15,6 +15,7 @@
 
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
+#include "vk_pipelines.h"
 
 VulkanEngine* loadedEngine = nullptr;
 
@@ -43,6 +44,8 @@ void VulkanEngine::init()
 	init_swapchain();
 	init_commands();
 	init_sync_structures();
+	init_descriptors();
+	init_pipelines();
 
 	// everything went fine
 	_isInitialized = true;
@@ -228,6 +231,85 @@ void VulkanEngine::init_sync_structures()
 	}
 }
 
+void VulkanEngine::init_descriptors()
+{
+	//create a descriptor pool that will hold 10 sets with 1 image each
+	std::vector<DescriptorAllocator::PoolSizeRatio> sizes =
+	{
+		{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1}
+	};
+
+	_globalDesriptorAllocator.init_pool(_device, 10, sizes);
+
+	//make the descriptor set layout for our compute draw
+	DescriptorLayoutBuilder builder;
+	builder.add_binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+	_drawImageDescriptorLayout = builder.build(_device, VK_SHADER_STAGE_COMPUTE_BIT);
+
+	//allocate a descriptor set for our draw image
+	_drawImageDescriptors = _globalDesriptorAllocator.allocate(_device, _drawImageDescriptorLayout);
+
+	VkDescriptorImageInfo imgInfo{};
+	imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	imgInfo.imageView = _drawImage.imageView;
+
+	VkWriteDescriptorSet drawImageWrite = {};
+	drawImageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	drawImageWrite.pNext = nullptr;
+
+	drawImageWrite.dstBinding = 0;
+	drawImageWrite.dstSet = _drawImageDescriptors;
+	drawImageWrite.descriptorCount = 1;
+	drawImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	drawImageWrite.pImageInfo = &imgInfo;
+
+	vkUpdateDescriptorSets(_device, 1, &drawImageWrite, 0, nullptr);
+}
+
+void VulkanEngine::init_pipelines()
+{
+	init_background_pipelines();
+}
+
+void VulkanEngine::init_background_pipelines()
+{
+	VkPipelineLayoutCreateInfo computeLayout{};
+	computeLayout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	computeLayout.pNext = nullptr;
+	computeLayout.pSetLayouts = &_drawImageDescriptorLayout;
+	computeLayout.setLayoutCount = 1;
+
+	VK_CHECK(vkCreatePipelineLayout(_device, &computeLayout, nullptr, &_gradientPipelineLayout));
+
+	VkShaderModule computeDrawShader;
+	if(!vkutil::load_shader_module("../../shaders/gradient.comp.spv", _device, &computeDrawShader))
+	{
+		fmt::print("Error when building compute shader \n");
+	}
+
+	VkPipelineShaderStageCreateInfo stageInfo{};
+	stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stageInfo.pNext = nullptr;
+	stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	stageInfo.module = computeDrawShader;
+	stageInfo.pName = "main";
+
+	VkComputePipelineCreateInfo computePipelineCreateInfo{};
+	computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	computePipelineCreateInfo.pNext = nullptr;
+	computePipelineCreateInfo.layout = _gradientPipelineLayout;
+	computePipelineCreateInfo.stage = stageInfo;
+
+	VK_CHECK(vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &_gradientPipeline));
+
+	//we have no need for the module anymore now we've created the pipeline
+	vkDestroyShaderModule(_device, computeDrawShader, nullptr);
+	_mainDeletionQueue.push_function([&]()
+		{
+			vkDestroyPipelineLayout(_device, _gradientPipelineLayout, nullptr);
+			vkDestroyPipeline(_device, _gradientPipeline, nullptr);
+		});
+}
 
 void VulkanEngine::cleanup()
 {
@@ -354,8 +436,14 @@ void VulkanEngine::draw_background(VkCommandBuffer cmd)
 
 	VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
 
-	//clear image
-	vkCmdClearColorImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+	//bind the gradient drawing compute pipeline
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _gradientPipeline);
+
+	//bind the descriptor set containing the draw image for the compute pipeline
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _gradientPipelineLayout, 0, 1, &_drawImageDescriptors, 0, nullptr);
+
+	//execute the compute pipeline dispatch. We are using a 16x16 workgroup, so must divide it by 16
+	vkCmdDispatch(cmd, std::ceil(_drawExtent.width / 16.0), std::ceil(_drawExtent.height / 16.0), 1);
 }
 
 void VulkanEngine::run()
