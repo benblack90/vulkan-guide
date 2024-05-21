@@ -58,6 +58,11 @@ public:
 	VkDescriptorSet _drawImageDescriptors;
 	VkDescriptorSetLayout _drawImageDescriptorLayout;
 
+	//immediate submit structures
+	VkFence _immFence;
+	VkCommandBuffer _immCommandBuffer;
+	VkCommandPool _immCommandPool;
+
 	//handles to the actual images
 	std::vector<VkImage> _swapchainImages;
 	//wrappers for those images
@@ -90,6 +95,8 @@ public:
 	//run main loop
 	void run();
 
+	void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
+
 private:
 	DeletionQueue _mainDeletionQueue;
 	VmaAllocator _allocator;
@@ -100,6 +107,7 @@ private:
 	void init_descriptors();
 	void init_pipelines();
 	void init_background_pipelines();
+	void init_imgui();
 	void draw_background(VkCommandBuffer cmd);
 
 	void create_swapchain(uint32_t width, uint32_t height);

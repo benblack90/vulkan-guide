@@ -9,7 +9,7 @@ bool vkutil::load_shader_module(const char* filePath, VkDevice device, VkShaderM
 
 	if (!file.is_open()) return false;
 
-	//find what the sie of the file is by looking up the location of the cursor (it's at the end, remember)
+	//find what the size of the file is by looking up the location of the cursor (it's at the end, remember)
 	//this gives the size of the file in bytes
 	size_t fileSize = (size_t)file.tellg();
 

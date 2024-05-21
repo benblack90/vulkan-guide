@@ -13,6 +13,10 @@
 #include "VkBootstrap.h"
 #include "vk_images.h"
 
+#include "imgui.h"
+#include "imgui_impl_sdl2.h"
+#include "imgui_impl_vulkan.h"
+
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 #include "vk_pipelines.h"
@@ -46,6 +50,7 @@ void VulkanEngine::init()
 	init_sync_structures();
 	init_descriptors();
 	init_pipelines();
+	init_imgui();
 
 	// everything went fine
 	_isInitialized = true;
@@ -213,6 +218,18 @@ void VulkanEngine::init_commands()
 
 		VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &_frames[i]._mainCommandBuffer));
 	}
+
+	VK_CHECK(vkCreateCommandPool(_device, &commandPoolInfo, nullptr, &_immCommandPool));
+
+	//allocate the command buffer for immediate submits
+	VkCommandBufferAllocateInfo immCmdAllocInfo = vkinit::command_buffer_allocate_info(_immCommandPool, 1);
+
+	VK_CHECK(vkAllocateCommandBuffers(_device, &immCmdAllocInfo, &_immCommandBuffer));
+
+	_mainDeletionQueue.push_function([=]()
+		{
+			vkDestroyCommandPool(_device, _immCommandPool, nullptr);
+		});
 }
 
 void VulkanEngine::init_sync_structures()
@@ -229,6 +246,12 @@ void VulkanEngine::init_sync_structures()
 		VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._swapchainSemaphore));
 		VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._renderSemaphore));
 	}
+
+	VK_CHECK(vkCreateFence(_device, &fenceCreateInfo, nullptr, &_immFence));
+	_mainDeletionQueue.push_function([=]()
+		{
+			vkDestroyFence(_device, _immFence, nullptr);
+		});
 }
 
 void VulkanEngine::init_descriptors()
@@ -249,14 +272,16 @@ void VulkanEngine::init_descriptors()
 	//allocate a descriptor set for our draw image
 	_drawImageDescriptors = _globalDesriptorAllocator.allocate(_device, _drawImageDescriptorLayout);
 
+	//This is the image view we want to draw to, which we need to pass to vkUpdateDescriptorSets
 	VkDescriptorImageInfo imgInfo{};
 	imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 	imgInfo.imageView = _drawImage.imageView;
 
+	//This is an update to pass to vkUpdateDescriptorSets. It holds the VkDescriptorset, the image view, the binding, and some other info.
+	//In this case, there is only one, which we point to binding 0, but this could be a whole chain of updates.
 	VkWriteDescriptorSet drawImageWrite = {};
 	drawImageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 	drawImageWrite.pNext = nullptr;
-
 	drawImageWrite.dstBinding = 0;
 	drawImageWrite.dstSet = _drawImageDescriptors;
 	drawImageWrite.descriptorCount = 1;
@@ -292,6 +317,8 @@ void VulkanEngine::init_background_pipelines()
 	stageInfo.pNext = nullptr;
 	stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	stageInfo.module = computeDrawShader;
+	//This is the entry point to use in the shader. We could create a bunch of variants in the same file if we wanted, and specify the different
+	//entry points here.
 	stageInfo.pName = "main";
 
 	VkComputePipelineCreateInfo computePipelineCreateInfo{};
@@ -309,6 +336,96 @@ void VulkanEngine::init_background_pipelines()
 			vkDestroyPipelineLayout(_device, _gradientPipelineLayout, nullptr);
 			vkDestroyPipeline(_device, _gradientPipeline, nullptr);
 		});
+}
+
+void VulkanEngine::init_imgui()
+{
+	//1: create descriptor pool for IMGUI
+	//the size of the pool is very oversized, but this is copied from the imgui demo itself
+	VkDescriptorPoolSize pool_sizes[] = { { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+		{ VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 } };
+
+	VkDescriptorPoolCreateInfo pool_info = {};
+	pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	pool_info.maxSets = 1000;
+	pool_info.poolSizeCount = (uint32_t)std::size(pool_sizes);
+	pool_info.pPoolSizes = pool_sizes;
+
+	VkDescriptorPool imguiPool;
+	VK_CHECK(vkCreateDescriptorPool(_device, &pool_info, nullptr, &imguiPool));
+
+	// 2: initialize imgui library
+
+	// this initializes the core structures of imgui
+	ImGui::CreateContext();
+
+	// this initializes imgui for SDL
+	ImGui_ImplSDL2_InitForVulkan(_window);
+
+	// this initializes imgui for Vulkan
+	ImGui_ImplVulkan_InitInfo init_info = {};
+	init_info.Instance = _instance;
+	init_info.PhysicalDevice = _chosenGPU;
+	init_info.Device = _device;
+	init_info.Queue = _graphicsQueue;
+	init_info.DescriptorPool = imguiPool;
+	init_info.MinImageCount = 3;
+	init_info.ImageCount = 3;
+	init_info.UseDynamicRendering = true;
+
+	////dynamic rendering parameters for imgui to use
+	//init_info.PipelineRenderingCreateInfo = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+	//init_info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+	//init_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &_swapchainImageFormat;
+	//
+
+	//init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+
+	//ImGui_ImplVulkan_Init(&init_info);
+
+	//ImGui_ImplVulkan_CreateFontsTexture();
+
+	// add the destroy the imgui created structures
+	_mainDeletionQueue.push_function([=]() {
+		ImGui_ImplVulkan_Shutdown();
+		vkDestroyDescriptorPool(_device, imguiPool, nullptr);
+	});
+}
+
+
+//This function is very similar to how we are executing commands on the GPU, except we are not synchronizing submit with the swapchain.
+//We will use this function for data uploads and other 'instant' operations outside of the render loop.
+void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function)
+{
+	VK_CHECK(vkResetFences(_device, 1, &_immFence));
+	VK_CHECK(vkResetCommandBuffer(_immCommandBuffer, 0));
+
+	VkCommandBuffer cmd = _immCommandBuffer;
+
+	VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
+
+	function(cmd);
+
+	VK_CHECK(vkEndCommandBuffer(cmd));
+
+	VkCommandBufferSubmitInfo cmdInfo = vkinit::command_buffer_submit_info(cmd);
+	VkSubmitInfo2 submit = vkinit::submit_info(&cmdInfo, nullptr, nullptr);
+
+	//submit command buffer to the queue and execute it. _renderFence will now block until the graphic commands finish execution
+	VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit, _immFence));
+	VK_CHECK(vkWaitForFences(_device, 1, &_immFence, true, 9999999999));
 }
 
 void VulkanEngine::cleanup()
@@ -430,11 +547,11 @@ void VulkanEngine::draw_background(VkCommandBuffer cmd)
 {
 	//make a clear-color (clear, as in the colour that appears when you clear the frame, not as in 'transparent')
 	// from frame number. This will flash with a 120 frame period.
-	VkClearColorValue clearValue;
-	float flash = std::abs(std::sin(_frameNumber / 120.f));
-	clearValue = { { 0.0f, 0.0f, flash, 1.0f } };
+	//VkClearColorValue clearValue;
+	//float flash = std::abs(std::sin(_frameNumber / 120.f));
+	//clearValue = { { 0.0f, 0.0f, flash, 1.0f } };
 
-	VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+	//VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
 
 	//bind the gradient drawing compute pipeline
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _gradientPipeline);
