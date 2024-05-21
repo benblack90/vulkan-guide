@@ -340,8 +340,9 @@ void VulkanEngine::init_background_pipelines()
 
 void VulkanEngine::init_imgui()
 {
-	//1: create descriptor pool for IMGUI
-	//the size of the pool is very oversized, but this is copied from the imgui demo itself
+	// 1: create descriptor pool for IMGUI
+	//  the size of the pool is very oversize, but it's copied from imgui demo
+	//  itself.
 	VkDescriptorPoolSize pool_sizes[] = { { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
 		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
 		{ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
@@ -382,24 +383,23 @@ void VulkanEngine::init_imgui()
 	init_info.MinImageCount = 3;
 	init_info.ImageCount = 3;
 	init_info.UseDynamicRendering = true;
+	init_info.ColorAttachmentFormat = _swapchainImageFormat;
 
-	////dynamic rendering parameters for imgui to use
-	//init_info.PipelineRenderingCreateInfo = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-	//init_info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
-	//init_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &_swapchainImageFormat;
-	//
+	init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 
-	//init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+	ImGui_ImplVulkan_Init(&init_info, VK_NULL_HANDLE);
 
-	//ImGui_ImplVulkan_Init(&init_info);
+	// execute a gpu command to upload imgui font textures
+	immediate_submit([&](VkCommandBuffer cmd) { ImGui_ImplVulkan_CreateFontsTexture(cmd); });
 
-	//ImGui_ImplVulkan_CreateFontsTexture();
+	// clear font textures from cpu data
+	ImGui_ImplVulkan_DestroyFontUploadObjects();
 
 	// add the destroy the imgui created structures
 	_mainDeletionQueue.push_function([=]() {
-		ImGui_ImplVulkan_Shutdown();
 		vkDestroyDescriptorPool(_device, imguiPool, nullptr);
-	});
+		ImGui_ImplVulkan_Shutdown();
+		});
 }
 
 
