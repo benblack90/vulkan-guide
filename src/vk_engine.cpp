@@ -502,8 +502,14 @@ void VulkanEngine::draw()
 	//copy the draw image to the swapchain
 	vkutil::copy_image_to_image(cmd, _drawImage.image, _swapchainImages[swapchainImageIndex], _drawExtent, _swapchainExtent);
 
-	//set swapchain image layout to present so we can show it on screen
-	vkutil::transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	// set swapchain image layout to Attachment Optimal so we can draw it
+	vkutil::transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+	//draw imgui into the swapchain image
+	draw_imgui(cmd, _swapchainImageViews[swapchainImageIndex]);
+
+	// set swapchain image layout to Present so we can draw it
+	vkutil::transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 	//finalize the command buffer (we can no longer add commands, but it can now be executed)
 	VK_CHECK(vkEndCommandBuffer(cmd));
@@ -563,6 +569,18 @@ void VulkanEngine::draw_background(VkCommandBuffer cmd)
 	vkCmdDispatch(cmd, std::ceil(_drawExtent.width / 16.0), std::ceil(_drawExtent.height / 16.0), 1);
 }
 
+void VulkanEngine::draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView)
+{
+	VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(targetImageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	VkRenderingInfo renderInfo = vkinit::rendering_info(_swapchainExtent, &colorAttachment, nullptr);
+
+	vkCmdBeginRendering(cmd, &renderInfo);
+
+	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+
+	vkCmdEndRendering(cmd);
+}
+
 void VulkanEngine::run()
 {
 	SDL_Event e;
@@ -584,6 +602,8 @@ void VulkanEngine::run()
 					stop_rendering = false;
 				}
 			}
+			//sedn SDL even tto imgui for handling
+			ImGui_ImplSDL2_ProcessEvent(&e);
 		}
 
 		// do not draw if we are minimized
@@ -592,6 +612,17 @@ void VulkanEngine::run()
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			continue;
 		}
+
+		//imgui new frame
+		ImGui_ImplVulkan_NewFrame();
+		ImGui_ImplSDL2_NewFrame();
+		ImGui::NewFrame();
+
+		//some imgui ui to test
+		ImGui::ShowDemoWindow();
+
+		//make imgui calculate internal draw structures
+		ImGui::Render();
 
 		draw();
 	}
