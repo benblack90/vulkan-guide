@@ -98,6 +98,7 @@ public:
 	AllocatedImage _drawImage;
 	AllocatedImage _depthImage;
 	VkExtent2D _drawExtent;
+	float renderScale = 1.0f;
 
 	std::vector<std::shared_ptr<MeshAsset>> testMeshes;
 
@@ -121,6 +122,7 @@ public:
 
 	void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
 	GPUMeshBuffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
+	bool resize_requested{ false };
 
 private:
 	DeletionQueue _mainDeletionQueue;
@@ -142,6 +144,7 @@ private:
 	void draw_geometry(VkCommandBuffer cmd);
 	void create_swapchain(uint32_t width, uint32_t height);
 	void destroy_swapchain();	
+	void resize_swapchain();
 	AllocatedBuffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
 	void destroy_buffer(const AllocatedBuffer& buffer);
 };
