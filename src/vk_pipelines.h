@@ -35,5 +35,6 @@ public:
     void set_color_attachment_format(VkFormat format);
     void set_depth_format(VkFormat format);
     void disable_depthtest();
+    void enable_depthtest(bool depthWriteEnable, VkCompareOp op);
 };
 

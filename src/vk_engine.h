@@ -5,6 +5,7 @@
 
 #include <vk_types.h>
 #include "vk_descriptors.h"
+#include <vk_loader.h>
 
 struct DeletionQueue
 {
@@ -70,8 +71,6 @@ public:
 	DescriptorAllocator _globalDesriptorAllocator;
 	VkPipeline _gradientPipeline;
 	VkPipelineLayout _gradientPipelineLayout;
-	VkPipelineLayout _trianglePipelineLayout;
-	VkPipeline _trianglePipeline;
 	VkPipelineLayout _meshPipelineLayout;
 	VkPipeline _meshPipeline;
 
@@ -97,7 +96,10 @@ public:
 
 	//draw resources
 	AllocatedImage _drawImage;
+	AllocatedImage _depthImage;
 	VkExtent2D _drawExtent;
+
+	std::vector<std::shared_ptr<MeshAsset>> testMeshes;
 
 	FrameData& get_current_frame() { return _frames[_frameNumber % FRAME_OVERLAP]; };
 
@@ -118,6 +120,7 @@ public:
 	void run();
 
 	void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
+	GPUMeshBuffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
 
 private:
 	DeletionQueue _mainDeletionQueue;
@@ -132,15 +135,13 @@ private:
 	void init_pipelines();
 	void init_background_pipelines();
 	void init_imgui();
-	void init_triangle_pipeline();
 	void init_mesh_pipeline();
 	void init_default_data();
 	void draw_background(VkCommandBuffer cmd);
 	void draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView);
 	void draw_geometry(VkCommandBuffer cmd);
 	void create_swapchain(uint32_t width, uint32_t height);
-	void destroy_swapchain();
-	GPUMeshBuffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
+	void destroy_swapchain();	
 	AllocatedBuffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
 	void destroy_buffer(const AllocatedBuffer& buffer);
 };
